@@ -15,6 +15,11 @@ from nltk.tokenize import word_tokenize
 from collections import Counter
 import string
 import time
+import os
+import json
+import hashlib
+from bs4 import BeautifulSoup
+from datetime import datetime
 
 def download_nltk_resources():
     """Download required NLTK resources if not already downloaded."""
@@ -26,6 +31,92 @@ def download_nltk_resources():
         nltk.download('punkt')
         nltk.download('stopwords')
 
+def create_cache_dir():
+    """Create a cache directory if it doesn't exist."""
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir)
+    return cache_dir
+
+def get_cache_filename(category, content_type):
+    """
+    Generate a cache filename for a category and content type.
+    
+    Args:
+        category (str): The Wikipedia category name
+        content_type (str): The type of content ('pages' or 'content')
+        
+    Returns:
+        str: The cache filename
+    """
+    # Create a hash of the category name to use in the filename
+    category_hash = hashlib.md5(category.encode()).hexdigest()
+    return f"{category_hash}_{content_type}.json"
+
+def load_from_cache(category, content_type):
+    """
+    Load data from cache if available.
+    
+    Args:
+        category (str): The Wikipedia category name
+        content_type (str): The type of content ('pages' or 'content')
+        
+    Returns:
+        dict or None: The cached data if available, None otherwise
+    """
+    cache_dir = create_cache_dir()
+    cache_file = os.path.join(cache_dir, get_cache_filename(category, content_type))
+    
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+            
+            # Check if the cache is still valid (less than 7 days old)
+            cache_timestamp = cached_data.get('timestamp', 0)
+            current_time = datetime.now().timestamp()
+            
+            # 7 days in seconds
+            cache_validity = 7 * 24 * 60 * 60
+            
+            if current_time - cache_timestamp < cache_validity:
+                print(f"Loading {content_type} from cache...")
+                return cached_data
+            else:
+                print(f"Cache for {content_type} is outdated. Fetching fresh data...")
+                return None
+        except Exception as e:
+            print(f"Error loading from cache: {e}")
+            return None
+    else:
+        print(f"No cache found for {content_type}.")
+        return None
+
+def save_to_cache(category, content_type, data):
+    """
+    Save data to cache.
+    
+    Args:
+        category (str): The Wikipedia category name
+        content_type (str): The type of content ('pages' or 'content')
+        data: The data to cache
+    """
+    cache_dir = create_cache_dir()
+    cache_file = os.path.join(cache_dir, get_cache_filename(category, content_type))
+    
+    # Add timestamp to the data
+    data_to_cache = {
+        'timestamp': datetime.now().timestamp(),
+        'data': data
+    }
+    
+    try:
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(data_to_cache, f, ensure_ascii=False, indent=2)
+        print(f"Saved {content_type} to cache.")
+    except Exception as e:
+        print(f"Error saving to cache: {e}")
+
 def get_pages_in_category(category):
     """
     Get all pages in a Wikipedia category using the MediaWiki API.
@@ -36,11 +127,17 @@ def get_pages_in_category(category):
     Returns:
         list: A list of page titles in the category
     """
-    print(f"Retrieving pages in category: {category}")
-    
     # Add 'Category:' prefix if not present
+    full_category = category
     if not category.startswith("Category:"):
-        category = f"Category:{category}"
+        full_category = f"Category:{category}"
+    
+    # Check cache first
+    cached_data = load_from_cache(full_category, 'pages')
+    if cached_data:
+        return cached_data['data']
+    
+    print(f"Retrieving pages in category: {category}")
     
     session = requests.Session()
     url = "https://en.wikipedia.org/w/api.php"
@@ -54,7 +151,7 @@ def get_pages_in_category(category):
             "action": "query",
             "format": "json",
             "list": "categorymembers",
-            "cmtitle": category,
+            "cmtitle": full_category,
             "cmlimit": 500,  # Maximum allowed by the API
             "cmtype": "page"  # Only get pages, not subcategories
         }
@@ -81,6 +178,10 @@ def get_pages_in_category(category):
             break
     
     print(f"Total pages found: {len(all_pages)}")
+    
+    # Save to cache
+    save_to_cache(full_category, 'pages', all_pages)
+    
     return all_pages
 
 def get_page_content(page_title):
@@ -93,6 +194,11 @@ def get_page_content(page_title):
     Returns:
         str: The text content of the page
     """
+    # Check cache first
+    cached_data = load_from_cache(page_title, 'content')
+    if cached_data:
+        return cached_data['data']
+    
     session = requests.Session()
     url = "https://en.wikipedia.org/w/api.php"
     
@@ -112,10 +218,14 @@ def get_page_content(page_title):
     pages = data["query"]["pages"]
     page_id = list(pages.keys())[0]
     
+    content = ""
     if "extract" in pages[page_id]:
-        return pages[page_id]["extract"]
-    else:
-        return ""
+        content = pages[page_id]["extract"]
+    
+    # Save to cache
+    save_to_cache(page_title, 'content', content)
+    
+    return content
 
 def analyze_text(text):
     """
@@ -153,6 +263,9 @@ def main():
     
     # Download NLTK resources if needed
     download_nltk_resources()
+    
+    # Create cache directory if it doesn't exist
+    create_cache_dir()
     
     # Get all pages in the category
     pages = get_pages_in_category(category)

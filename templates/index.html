@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wikipedia Category Word Cloud</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-cloud@1.2.5/build/d3.layout.cloud.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #343a40;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        #wordcloud-container {
+            width: 100%;
+            height: 500px;
+            margin-top: 30px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+            position: relative;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+            color: #6c757d;
+        }
+        .word-tooltip {
+            position: absolute;
+            padding: 8px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            border-radius: 4px;
+            pointer-events: none;
+            font-size: 12px;
+            z-index: 1000;
+        }
+        #stats {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+        .color-scale {
+            display: flex;
+            margin-top: 10px;
+            height: 20px;
+        }
+        .color-scale-item {
+            flex: 1;
+            height: 100%;
+        }
+        .legend {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Wikipedia Category Word Cloud</h1>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="category-select" class="form-label">Select a category:</label>
+                    <select id="category-select" class="form-select">
+                        <option value="loading">Loading categories...</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="category-input" class="form-label">Or enter a new category:</label>
+                    <div class="input-group">
+                        <input type="text" id="category-input" class="form-control" placeholder="e.g., Machine_learning">
+                        <button id="generate-btn" class="btn btn-primary">Generate Word Cloud</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="wordcloud-container">
+            <div id="loading">Loading word cloud...</div>
+        </div>
+        
+        <div id="stats">
+            <h4>Word Frequency Information</h4>
+            <p>Total unique words: <span id="total-words">0</span></p>
+            <p>Most frequent word: <span id="most-frequent-word">-</span> (frequency: <span id="most-frequent-count">0</span>)</p>
+            <p>Color scale represents word frequency:</p>
+            <div class="color-scale">
+                <div class="color-scale-item" style="background-color: #4575b4;"></div>
+                <div class="color-scale-item" style="background-color: #74add1;"></div>
+                <div class="color-scale-item" style="background-color: #abd9e9;"></div>
+                <div class="color-scale-item" style="background-color: #e0f3f8;"></div>
+                <div class="color-scale-item" style="background-color: #fee090;"></div>
+                <div class="color-scale-item" style="background-color: #fdae61;"></div>
+                <div class="color-scale-item" style="background-color: #f46d43;"></div>
+                <div class="color-scale-item" style="background-color: #d73027;"></div>
+            </div>
+            <div class="legend">
+                <span>Lower frequency</span>
+                <span>Higher frequency</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Create tooltip element
+            const tooltip = document.createElement('div');
+            tooltip.className = 'word-tooltip';
+            tooltip.style.display = 'none';
+            document.body.appendChild(tooltip);
+            
+            // Load available categories
+            fetch('/api/categories')
+                .then(response => response.json())
+                .then(categories => {
+                    const select = document.getElementById('category-select');
+                    select.innerHTML = '';
+                    
+                    categories.forEach(category => {
+                        const option = document.createElement('option');
+                        option.value = category;
+                        option.textContent = category.replace(/_/g, ' ');
+                        select.appendChild(option);
+                    });
+                    
+                    // Generate word cloud for the first category
+                    if (categories.length > 0) {
+                        generateWordCloud(categories[0]);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading categories:', error);
+                    document.getElementById('category-select').innerHTML = '<option value="">Error loading categories</option>';
+                });
+            
+            // Event listener for category selection
+            document.getElementById('category-select').addEventListener('change', function() {
+                const category = this.value;
+                if (category) {
+                    generateWordCloud(category);
+                }
+            });
+            
+            // Event listener for generate button
+            document.getElementById('generate-btn').addEventListener('click', function() {
+                const category = document.getElementById('category-input').value.trim();
+                if (category) {
+                    generateWordCloud(category);
+                } else {
+                    alert('Please enter a category name');
+                }
+            });
+            
+            // Function to generate word cloud
+            function generateWordCloud(category) {
+                // Show loading indicator
+                document.getElementById('loading').style.display = 'block';
+                
+                // Clear previous word cloud
+                document.getElementById('wordcloud-container').innerHTML = '<div id="loading">Loading word cloud...</div>';
+                
+                // Fetch word frequency data
+                fetch(`/api/wordcloud?category=${encodeURIComponent(category)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        // Hide loading indicator
+                        document.getElementById('loading').style.display = 'none';
+                        
+                        // Update stats
+                        document.getElementById('total-words').textContent = Object.keys(data).length;
+                        
+                        if (Object.keys(data).length > 0) {
+                            const sortedWords = Object.entries(data).sort((a, b) => b[1] - a[1]);
+                            const [mostFrequentWord, mostFrequentCount] = sortedWords[0];
+                            
+                            document.getElementById('most-frequent-word').textContent = mostFrequentWord;
+                            document.getElementById('most-frequent-count').textContent = mostFrequentCount;
+                            
+                            // Generate word cloud
+                            createWordCloud(data);
+                        } else {
+                            document.getElementById('wordcloud-container').innerHTML = '<div style="text-align: center; padding: 20px;">No data available for this category</div>';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching word cloud data:', error);
+                        document.getElementById('loading').style.display = 'none';
+                        document.getElementById('wordcloud-container').innerHTML = '<div style="text-align: center; padding: 20px;">Error loading word cloud data</div>';
+                    });
+            }
+            
+            // Function to create word cloud using D3
+            function createWordCloud(wordFrequencies) {
+                // Convert data to the format required by d3-cloud
+                const words = Object.entries(wordFrequencies).map(([text, size]) => ({
+                    text,
+                    size: Math.log(size) * 10 + 10 // Scale size logarithmically
+                }));
+                
+                // Get container dimensions
+                const container = document.getElementById('wordcloud-container');
+                const width = container.clientWidth;
+                const height = container.clientHeight;
+                
+                // Color scale
+                const color = d3.scaleSequential(d3.interpolateRdYlBu)
+                    .domain([0, words.length]);
+                
+                // Create word cloud layout
+                const layout = d3.layout.cloud()
+                    .size([width, height])
+                    .words(words)
+                    .padding(5)
+                    .rotate(() => ~~(Math.random() * 2) * 90)
+                    .fontSize(d => d.size)
+                    .on('end', draw);
+                
+                // Start layout calculation
+                layout.start();
+                
+                // Function to draw the word cloud
+                function draw(words) {
+                    // Clear container
+                    container.innerHTML = '';
+                    
+                    // Create SVG element
+                    const svg = d3.select('#wordcloud-container')
+                        .append('svg')
+                        .attr('width', width)
+                        .attr('height', height);
+                    
+                    // Add words to SVG
+                    svg.append('g')
+                        .attr('transform', `translate(${width / 2},${height / 2})`)
+                        .selectAll('text')
+                        .data(words)
+                        .enter()
+                        .append('text')
+                        .style('font-size', d => `${d.size}px`)
+                        .style('font-family', 'Impact')
+                        .style('fill', (d, i) => color(i))
+                        .attr('text-anchor', 'middle')
+                        .attr('transform', d => `translate(${d.x},${d.y}) rotate(${d.rotate})`)
+                        .text(d => d.text)
+                        .on('mouseover', function(event, d) {
+                            // Show tooltip
+                            const freq = wordFrequencies[d.text];
+                            tooltip.textContent = `${d.text}: ${freq}`;
+                            tooltip.style.display = 'block';
+                            tooltip.style.left = `${event.pageX + 10}px`;
+                            tooltip.style.top = `${event.pageY + 10}px`;
+                            
+                            // Highlight word
+                            d3.select(this).style('opacity', 0.7);
+                        })
+                        .on('mousemove', function(event) {
+                            // Move tooltip with cursor
+                            tooltip.style.left = `${event.pageX + 10}px`;
+                            tooltip.style.top = `${event.pageY + 10}px`;
+                        })
+                        .on('mouseout', function() {
+                            // Hide tooltip
+                            tooltip.style.display = 'none';
+                            
+                            // Remove highlight
+                            d3.select(this).style('opacity', 1);
+                        });
+                }
+            }
+        });
+    </script>
+</body>
+</html>
