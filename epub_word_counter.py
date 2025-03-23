@@ -2,7 +2,9 @@ import ebooklib
 from ebooklib import epub
 import re
 import os
+import sys
 from bs4 import BeautifulSoup
+from pathlib import Path
 
 def extract_text_from_epub(epub_path):
     """Extract text content from an EPUB file."""
@@ -31,9 +33,24 @@ def count_words(text):
     
     return word_count
 
+def write_word_count_to_file(word_counts, output_file):
+    """Write word counts to a file."""
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    
+    # Write counts to file
+    with open(output_file, 'w', encoding='utf-8') as f:
+        for word, count in sorted(word_counts.items()):
+            f.write(f"{word} {count}\n")
+    
+    print(f"Word counts written to {output_file}")
+
 def update_word_count_file(new_counts, output_file):
     """Update the word count file with new counts."""
     existing_counts = {}
+    
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
     
     # Read existing counts if file exists
     if os.path.exists(output_file):
@@ -54,28 +71,43 @@ def update_word_count_file(new_counts, output_file):
     with open(output_file, 'w', encoding='utf-8') as f:
         for word, count in sorted(existing_counts.items()):
             f.write(f"{word} {count}\n")
+    
+    print(f"Word count updated in {output_file}")
 
-def main(epub_path, output_file):
+def get_epub_filename(epub_path):
+    """Extract the base filename from the EPUB path without extension."""
+    return Path(epub_path).stem
+
+def main(epub_path):
     """Main function to process an EPUB file and update word counts."""
+    # Create words directory if it doesn't exist
+    words_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "words")
+    os.makedirs(words_dir, exist_ok=True)
+    
+    # Get EPUB filename (without extension)
+    epub_filename = get_epub_filename(epub_path)
+    
+    # Set output paths
+    individual_output_file = os.path.join(words_dir, f"{epub_filename}.txt")
+    consolidated_output_file = os.path.join(words_dir, "word_all.txt")
+    
     # Extract text from EPUB
     text = extract_text_from_epub(epub_path)
     
     # Count words
     word_counts = count_words(text)
     
-    # Update word count file
-    update_word_count_file(word_counts, output_file)
+    # Write individual word counts to file
+    write_word_count_to_file(word_counts, individual_output_file)
     
-    print(f"Word count updated in {output_file}")
+    # Update consolidated word count file
+    update_word_count_file(word_counts, consolidated_output_file)
 
 if __name__ == "__main__":
-    import sys
-    
     if len(sys.argv) < 2:
-        print("Usage: python script.py <epub_file_path> [output_file]")
+        print("Usage: python script.py <epub_file_path>")
         sys.exit(1)
     
     epub_path = sys.argv[1]
-    output_file = sys.argv[2] if len(sys.argv) > 2 else "word_all.txt"
     
-    main(epub_path, output_file)
+    main(epub_path)
