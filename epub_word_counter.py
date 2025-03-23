@@ -5,6 +5,7 @@ import os
 import sys
 from bs4 import BeautifulSoup
 from pathlib import Path
+import time
 
 def extract_text_from_epub(epub_path):
     """Extract text content from an EPUB file."""
@@ -19,18 +20,40 @@ def extract_text_from_epub(epub_path):
     
     return text
 
-def count_words(text):
-    """Count English words in text."""
+def load_coca_words(coca_file_path):
+    """Load allowed words from COCA60000.txt"""
+    coca_words = set()
+    try:
+        with open(coca_file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                word = line.strip().lower()
+                if word:  # Skip empty lines
+                    coca_words.add(word)
+        return coca_words
+    except Exception as e:
+        print(f"Error loading COCA word list: {e}")
+        return set()
+
+def count_words(text, coca_words):
+    """Count English words in text that appear in the COCA word list."""
     # Define pattern for English words (letters only)
     pattern = re.compile(r'\b[a-zA-Z]+\b')
     words = pattern.findall(text)
     
     # Count word occurrences
     word_count = {}
+    filtered_count = 0
+    
     for word in words:
         word = word.lower()  # Convert to lowercase
-        word_count[word] = word_count.get(word, 0) + 1
+        
+        # Only count words that appear in the COCA wordlist
+        if word in coca_words:
+            word_count[word] = word_count.get(word, 0) + 1
+        else:
+            filtered_count += 1
     
+    print(f"Filtered out {filtered_count} words not found in COCA60000.txt")
     return word_count
 
 def write_word_count_to_file(word_counts, output_file):
@@ -80,6 +103,8 @@ def get_epub_filename(epub_path):
 
 def main(epub_path):
     """Main function to process an EPUB file and update word counts."""
+    start_time = time.time()
+    
     # Create words directory if it doesn't exist
     words_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "words")
     os.makedirs(words_dir, exist_ok=True)
@@ -91,17 +116,26 @@ def main(epub_path):
     individual_output_file = os.path.join(words_dir, f"{epub_filename}.txt")
     consolidated_output_file = os.path.join(words_dir, "word_all.txt")
     
+    # Load COCA wordlist
+    coca_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library", "COCA60000.txt")
+    coca_words = load_coca_words(coca_file_path)
+    print(f"Loaded {len(coca_words)} words from COCA60000.txt")
+    
     # Extract text from EPUB
     text = extract_text_from_epub(epub_path)
     
-    # Count words
-    word_counts = count_words(text)
+    # Count words (filtering out words not in COCA list)
+    word_counts = count_words(text, coca_words)
     
     # Write individual word counts to file
     write_word_count_to_file(word_counts, individual_output_file)
     
     # Update consolidated word count file
     update_word_count_file(word_counts, consolidated_output_file)
+    
+    # Log execution time
+    end_time = time.time()
+    print(f"Processing completed in {end_time - start_time:.2f} seconds")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
